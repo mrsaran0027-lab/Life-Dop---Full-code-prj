@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LifeDrop — Blood Donation & Medical Appointments</title>
+    <meta name="description" content="Blood donation matching, emergency requests, donor network, and verified medical appointments platform." />
+    <meta property="og:title" content="LifeDrop — Blood Donation & Medical Appointments" />
+    <meta property="og:description" content="Blood donation matching, emergency requests, donor network, and verified medical appointments platform." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+
+    <!-- Google Fonts: Plus Jakarta Sans -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+
+    <!-- Tailwind CSS (Instant rendering in local VS Code without npm) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="./style.css">
+
+    <!-- Firebase App, Authentication & Firestore (Official Google SDK) -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+  </head>
+  <body class="bg-[#F8F9FC] text-slate-900 antialiased font-['Plus_Jakarta_Sans',sans-serif]">
+    <!-- Main Application Mount Point -->
+    <div id="app"></div>
+
+    <!-- Main Application Pure JavaScript -->
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
+

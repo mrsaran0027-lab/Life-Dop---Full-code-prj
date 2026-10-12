@@ -1,0 +1,114 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function userDoc() { return get(/databases/$(database)/documents/users/$(request.auth.uid)); }
+    function hasRole(r) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && userDoc().data.role == r;
+    }
+    function matchAfter(id) { return getAfter(/databases/$(database)/documents/matches/$(id)).data; }
+
+    // ---- users: role is locked once created -------------------------------
+    match /users/{uid} {
+      allow read:   if signedIn() && (request.auth.uid == uid || hasRole('doctor') || hasRole('admin'));
+      allow create: if signedIn() && request.auth.uid == uid
+                    && request.resource.data.role in ['patient', 'donor', 'doctor'];
+      allow update: if signedIn() && request.auth.uid == uid
+                    && request.resource.data.role == resource.data.role;
+    }
+
+    // ---- patient blood requests ------------------------------------------
+    match /patientRequests/{id} {
+      allow read: if signedIn() && (
+           resource.data.patientUid == request.auth.uid
+        || hasRole('doctor') || hasRole('admin')
+        || (hasRole('donor') && resource.data.status == 'Open'));
+      allow create: if hasRole('patient')
+                    && request.resource.data.patientUid == request.auth.uid
+                    && request.resource.data.status == 'Open';
+      allow update: if hasRole('admin') || (signedIn() && (
+           (resource.data.patientUid == request.auth.uid
+             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'matchId']))
+        || (hasRole('donor') && resource.data.status == 'Open'
+             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'matchId'])
+             && request.resource.data.status == 'Matched'
+             && matchAfter(request.resource.data.matchId).status == 'Accepted'
+             && matchAfter(request.resource.data.matchId).donorUid == request.auth.uid
+             && matchAfter(request.resource.data.matchId).requestId == id)));
+    }
+
+    // ---- donor availability and donor phone (contact shown in accepted match) ----
+    match /donors/{uid} {
+      allow read: if signedIn() && (
+           request.auth.uid == uid
+        || hasRole('doctor') || hasRole('admin')
+        || (hasRole('patient') && resource.data.status == 'Available'));
+      allow create: if request.auth.uid == uid && hasRole('donor');
+      allow update: if hasRole('admin') || (signedIn() && (
+           (request.auth.uid == uid && hasRole('donor')
+             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'availability', 'city', 'matchId'])
+             && (request.resource.data.status != 'Available'
+                 || !('cooldownUntil' in resource.data)
+                 || resource.data.cooldownUntil <= request.time))
+        || (hasRole('patient')
+             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'matchId'])
+             && request.resource.data.status == 'Matched'
+             && matchAfter(request.resource.data.matchId).status == 'Accepted'
+             && matchAfter(request.resource.data.matchId).patientUid == request.auth.uid
+             && matchAfter(request.resource.data.matchId).donorUid == uid)));
+    }
+
+    // ---- matches: one side offers, the other side accepts / rejects -------
+    match /matches/{id} {
+      allow read: if signedIn() && (resource.data.patientUid == request.auth.uid
+                                 || resource.data.donorUid == request.auth.uid || hasRole('admin'));
+      allow create: if signedIn() && (
+           (request.resource.data.initiatedBy == 'patient' && hasRole('patient')
+             && request.resource.data.patientUid == request.auth.uid
+             && request.resource.data.status == 'Pending'
+             && get(/databases/$(database)/documents/donors/$(request.resource.data.donorUid)).data.status == 'Available'
+             && (!('cooldownUntil' in get(/databases/$(database)/documents/donors/$(request.resource.data.donorUid)).data)
+                 || get(/databases/$(database)/documents/donors/$(request.resource.data.donorUid)).data.cooldownUntil <= request.time))
+        || (request.resource.data.initiatedBy == 'donor' && hasRole('donor')
+             && request.resource.data.donorUid == request.auth.uid
+             && request.resource.data.status in ['Pending', 'Rejected']
+             && get(/databases/$(database)/documents/donors/$(request.auth.uid)).data.status == 'Available'
+             && (!('cooldownUntil' in get(/databases/$(database)/documents/donors/$(request.auth.uid)).data)
+                 || get(/databases/$(database)/documents/donors/$(request.auth.uid)).data.cooldownUntil <= request.time)));
+      allow update: if (hasRole('admin')
+                    && resource.data.status == 'Accepted'
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['donationRecorded', 'donationRecordedAt', 'donationRecordedBy', 'cooldownDays']))
+                    || (signedIn()
+                    && resource.data.status == 'Pending'
+                    && request.resource.data.status in ['Accepted', 'Rejected']
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'respondedAt'])
+                    && ((resource.data.initiatedBy == 'patient' && request.auth.uid == resource.data.donorUid)
+                     || (resource.data.initiatedBy == 'donor'   && request.auth.uid == resource.data.patientUid)));
+
+      // Contact / location details: readable by the two parties ONLY after Accepted.
+      match /contact/{who} {
+        allow read: if signedIn()
+                    && (get(/databases/$(database)/documents/matches/$(id)).data.patientUid == request.auth.uid
+                     || get(/databases/$(database)/documents/matches/$(id)).data.donorUid == request.auth.uid)
+                    && get(/databases/$(database)/documents/matches/$(id)).data.status == 'Accepted';
+        allow create: if signedIn()
+                      && ((who == 'patient' && getAfter(/databases/$(database)/documents/matches/$(id)).data.patientUid == request.auth.uid)
+                       || (who == 'donor'   && getAfter(/databases/$(database)/documents/matches/$(id)).data.donorUid == request.auth.uid));
+      }
+    }
+
+    // ---- appointments: requester creates, doctor decides ------------------
+    match /appointments/{id} {
+      allow read: if signedIn() && (hasRole('doctor') || resource.data.requesterUid == request.auth.uid);
+      allow create: if (hasRole('patient') || hasRole('donor'))
+                    && request.resource.data.requesterUid == request.auth.uid
+                    && request.resource.data.status == 'Pending';
+      allow update: if hasRole('doctor')
+                    && request.resource.data.diff(resource.data).affectedKeys()
+                         .hasOnly(['status', 'acceptedTimeSlot', 'doctorNote', 'doctorUid', 'doctorName', 'reviewedAt']);
+    }
+  }
+}
